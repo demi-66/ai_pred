@@ -30,7 +30,7 @@
               <div class="query-item query-smelter">
                 <select v-model="filters.smelter" class="form-select form-select-sm">
                   <option value="">冶炼厂：全部</option>
-                  <option v-for="name in SMELTER_POOL" :key="name" :value="name">{{ name }}</option>
+                  <option v-for="name in smelterOptions" :key="name" :value="name">{{ name }}</option>
                 </select>
               </div>
               <div class="query-actions">
@@ -130,7 +130,11 @@ type TableRow = {
   cells: CellDisplay[]
 }
 
+/** 大区经理（仓库）：来自接口 warehouse_options */
 const managerOptions = computed(() => (warehouses.value || []).map((item) => String(item)))
+
+/** 冶炼厂筛选：固定两项 */
+const smelterOptions = ['金利', '豫光']
 
 function buildDateList(start: string, end: string) {
   if (!start || !end || start > end) return []
@@ -207,87 +211,6 @@ function flattenPlan(plan: unknown): TableRow[] {
     })
   })
   return result
-}
-
-const MOCK_ROW_COUNT = 20
-
-const DEFAULT_WAREHOUSES_FALLBACK = ['山东仓库', '山西仓库']
-
-/** 模拟数据轮询用；筛选下拉里同步展示，并非「仅两家冶炼厂」 */
-const SMELTER_POOL = [
-  '金利',
-  '豫光',
-  '株冶',
-  '水口山',
-  '驰宏锌锗',
-  '南方有色',
-  '中金岭南',
-  '葫芦岛锌业',
-  '东岭',
-  '白银有色',
-  '韶关冶炼',
-  '云锡',
-] as const
-
-/** 去重且保序；空则退回默认 */
-function normalizeWarehouseManagers(warehouseOptions: string[]): string[] {
-  const raw =
-    warehouseOptions.length > 0
-      ? warehouseOptions.map((s) => String(s).trim()).filter((s) => s.length > 0)
-      : [...DEFAULT_WAREHOUSES_FALLBACK]
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const m of raw) {
-    if (!seen.has(m)) {
-      seen.add(m)
-      out.push(m)
-    }
-  }
-  return out
-}
-
-/** 每个大区经理对应唯一冶炼厂；按列表顺序轮流分配，故同一冶炼厂可对应多个大区经理 */
-function buildManagerToSmelter(managers: string[]): Map<string, string> {
-  const map = new Map<string, string>()
-  managers.forEach((mgr, idx) => {
-    map.set(mgr, SMELTER_POOL[idx % SMELTER_POOL.length]!)
-  })
-  return map
-}
-
-/** 接口未返回 plan 时占位：大区经理全部来自 warehouse_options；行数不少于 20 且不少于大区经理人数 */
-function generateMockRows(dateList: string[], warehouseOptions: string[]): TableRow[] {
-  const managers = normalizeWarehouseManagers(warehouseOptions)
-  const managerToSmelter = buildManagerToSmelter(managers)
-  const targetCount = Math.max(MOCK_ROW_COUNT, managers.length)
-
-  const rows: TableRow[] = []
-  for (let i = 0; i < targetCount; i++) {
-    const regional_manager = managers[i % managers.length]!
-    const smelter = managerToSmelter.get(regional_manager)!
-    const contract_no = `DEMO_${String(i + 1).padStart(3, '0')}`
-
-    // 先排出货量；出货结束后的第一天写「已完成」，再往后只显示 —
-    const len = dateList.length
-    const cells: CellDisplay[] = []
-    if (len === 0) {
-      rows.push({ regional_manager, smelter, contract_no, cells })
-      continue
-    }
-    const truckDayCount = Math.min(len, 1 + (i % len))
-    for (let di = 0; di < len; di++) {
-      if (di < truckDayCount) {
-        const trucks = 1 + ((i + di) % 3)
-        cells.push({ text: String(trucks), completed: false })
-      } else if (di === truckDayCount) {
-        cells.push({ text: '已完成', completed: true })
-      } else {
-        cells.push({ text: '—', completed: false, isPlaceholder: true })
-      }
-    }
-    rows.push({ regional_manager, smelter, contract_no, cells })
-  }
-  return rows
 }
 
 function isPlanEmpty(plan: unknown): boolean {
@@ -398,14 +321,7 @@ async function queryTableData() {
     const dataObj = data as { warehouse_options?: string[]; plan?: unknown }
     warehouses.value = Array.isArray(dataObj?.warehouse_options) ? dataObj.warehouse_options : []
     const plan = dataObj?.plan
-    if (isPlanEmpty(plan)) {
-      rows.value = generateMockRows(
-        buildDateList(filters.value.startDate, filters.value.endDate),
-        warehouses.value,
-      )
-    } else {
-      rows.value = flattenPlan(plan)
-    }
+    rows.value = isPlanEmpty(plan) ? [] : flattenPlan(plan)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '查询失败'
     rows.value = []
