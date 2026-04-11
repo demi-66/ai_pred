@@ -11,10 +11,12 @@
     "update": "powershell -NoProfile -ExecutionPolicy Bypass -File ./update.ps1"
   },
   "dependencies": {
+    "axios": "^1.15.0",
     "bootstrap": "^5.3.3",
     "bootstrap-icons": "^1.11.3",
     "vue": "^3.5.30",
-    "vue-router": "^4.5.0"
+    "vue-router": "^4.5.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^24.12.0",

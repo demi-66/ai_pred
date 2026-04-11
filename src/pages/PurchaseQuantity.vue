@@ -20,8 +20,8 @@
           </div>
         </div>
         <div class="filter-actions">
-          <button class="btn btn-primary" @click="handleQuery" :disabled="tableLoading">
-            {{ tableLoading ? '加载中...' : '查询' }}
+          <button class="btn btn-primary" @click="handleQuery" :disabled="loading">
+            {{ loading ? '加载中...' : '查询' }}
           </button>
           <button class="btn btn-secondary" @click="handleReset">重置</button>
         </div>
@@ -31,33 +31,12 @@
     <!-- 图表区 -->
     <div class="card">
       <div class="section-title">未来送货量预测趋势</div>
-      <div class="chart-container" v-if="!tableLoading && chartData.dates.length > 0">
-        <div class="chart-legend">
-          <span class="legend-tip">👆 点击图例可显示/隐藏对应品种</span>
-          <div class="legend-items">
-            <div 
-              v-for="(series, idx) in chartData.series" 
-              :key="series.name"
-              class="legend-item"
-              @click="toggleSeries(series.name)"
-              :title="`点击${series.visible ? '隐藏' : '显示'}${series.name}趋势线`"
-            >
-              <span 
-                class="legend-color" 
-                :style="{ backgroundColor: series.visible ? colors[idx % colors.length] : '#ccc' }"
-              ></span>
-              <span 
-                class="legend-name"
-                :style="{ textDecoration: series.visible ? 'none' : 'line-through' }"
-              >{{ series.name }}</span>
-            </div>
-          </div>
-        </div>
+      <div class="chart-container" v-if="!loading && chartDates.length > 0">
         <div class="chart-wrapper">
           <canvas ref="chartCanvas"></canvas>
         </div>
       </div>
-      <div v-else-if="tableLoading" class="loading-placeholder">加载中...</div>
+      <div v-else-if="loading" class="loading-placeholder">加载中...</div>
       <div v-else class="loading-placeholder">暂无数据</div>
     </div>
 
@@ -65,7 +44,7 @@
     <div class="card">
       <div class="table-header">
         <div class="section-title">预测明细数据</div>
-        <button class="btn btn-secondary" @click="exportExcel" :disabled="tableLoading">导出Excel</button>
+        <button class="btn btn-secondary" @click="exportExcel" :disabled="loading">导出Excel</button>
       </div>
 
       <div class="table-wrapper">
@@ -73,24 +52,16 @@
           <thead>
             <tr>
               <th>预测日期</th>
-              <th>大区经理</th>
-              <th>仓库</th>
               <th>预测重量(吨)</th>
-              <th width="80">查看</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in paginatedData" :key="`${row.date}-${row.warehouse}`">
+            <tr v-for="(row, idx) in paginatedData" :key="idx">
               <td>{{ row.date }}</td>
-              <td>{{ row.regionalManager }}</td>
-              <td>{{ row.warehouse }}</td>
-              <td>{{ row.totalWeight }}</td>
-              <td>
-                <button class="btn-view" @click="openDetailModal(row)">查看</button>
-              </td>
+              <td>{{ parseFloat(row.weight).toFixed(2) }}</td>
             </tr>
             <tr v-if="paginatedData.length === 0">
-              <td :colspan="5" class="empty-data">暂无数据</td>
+              <td :colspan="2" class="empty-data">暂无数据</td>
             </tr>
           </tbody>
         </table>
@@ -108,129 +79,28 @@
         </select>
       </div>
     </div>
-
-    <!-- 品种明细弹窗 -->
-    <div v-if="modalVisible" class="modal" @click.self="closeModal">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3>{{ modalTitle }}</h3>
-          <button class="close-btn" @click="closeModal">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div class="modal-table-header">
-            <span class="modal-result-label">品种明细</span>
-            <button class="btn btn-secondary btn-sm" @click="exportModalExcel">导出Excel</button>
-          </div>
-          <div class="table-wrapper">
-            <table class="data-table modal-table">
-              <thead>
-                <tr>
-                  <th>品种</th>
-                  <th>预测重量(吨)</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in modalPaginatedData" :key="item.variety">
-                  <td>{{ item.variety }}</td>
-                  <td>{{ item.weight }}</td>
-                </tr>
-                <tr v-if="modalPaginatedData.length === 0">
-                  <td :colspan="2" class="empty-data">暂无数据</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <!-- 弹窗分页 -->
-          <div class="pagination modal-pagination">
-            <button @click="modalCurrentPage--" :disabled="modalCurrentPage === 1">上一页</button>
-            <span>第 {{ modalCurrentPage }} / {{ modalTotalPages }} 页</span>
-            <button @click="modalCurrentPage++" :disabled="modalCurrentPage === modalTotalPages">下一页</button>
-            <select v-model="modalPageSize" @change="modalCurrentPage = 1">
-              <option :value="5">5条/页</option>
-              <option :value="10">10条/页</option>
-              <option :value="20">20条/页</option>
-            </select>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" @click="closeModal">关闭</button>
-        </div>
-      </div>
-    </div>
   </div>
+/div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import axios from 'axios'
 
-// 类型定义
-interface ForecastRecord {
-  date: string
-  regionalManager: string
-  warehouse: string
-  variety: string
-  predictedWeight: number
+// ==================== 类型定义 ====================
+interface ChartData {
+  dates: string[]
+  total_by_date: string[]
+  by_regional_manager?: Array<{
+    regional_manager: string
+    totals: string[]
+  }>
 }
 
-// 汇总行数据
-interface SummaryRow {
-  date: string
-  regionalManager: string
-  warehouse: string
-  totalWeight: number
-  details: { variety: string; weight: number }[]
-}
-
-// 颜色常量
-const colors = ['#1F77B4', '#FF7F0E', '#2CA02C', '#D62728', '#9467BD', '#8C564B', '#E377C2', '#7F7F7F']
-
-// 模拟数据
-const generateMockForecastData = (): ForecastRecord[] => {
-  const managers = ['张建国', '李明华', '王德发']
-  const warehouses = ['北京仓库', '上海仓库', '广州仓库']
-  const varieties = ['电解铜', '铝锭', '锌锭']
-  
-  const data: ForecastRecord[] = []
-  const today = new Date()
-  
-  for (let i = 0; i <= 30; i++) {
-    const date = new Date()
-    date.setDate(today.getDate() + i)
-    const dateStr = date.toISOString().slice(0, 10)
-    
-    for (const manager of managers) {
-      for (const warehouse of warehouses) {
-        for (const variety of varieties) {
-          data.push({
-            date: dateStr,
-            regionalManager: manager,
-            warehouse: warehouse,
-            variety: variety,
-            predictedWeight: Math.floor(Math.random() * 300) + 50
-          })
-        }
-      }
-    }
-  }
-  
-  return data.sort((a, b) => {
-    if (a.date !== b.date) return a.date.localeCompare(b.date)
-    if (a.regionalManager !== b.regionalManager) return a.regionalManager.localeCompare(b.regionalManager)
-    if (a.warehouse !== b.warehouse) return a.warehouse.localeCompare(b.warehouse)
-    return a.variety.localeCompare(b.variety)
-  })
-}
-
-const ALL_FORECAST_DATA = generateMockForecastData()
-
-// 状态
-const tableLoading = ref(false)
-const rows = ref<SummaryRow[]>([])
+// ==================== 状态 ====================
+const loading = ref(false)
+const chartData = ref<ChartData | null>(null)
 const chartCanvas = ref<HTMLCanvasElement>()
-
-// 图例开关状态
-const seriesVisibility = ref<Map<string, boolean>>(new Map())
 
 // 筛选条件
 const todayStr = new Date().toISOString().slice(0, 10)
@@ -247,7 +117,25 @@ const filters = ref({
   endDate: getFutureDate(14)
 })
 
-// 验证日期范围（最多15天）
+// 分页
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalPages = computed(() => Math.max(1, Math.ceil((chartData.value?.dates.length || 0) / pageSize.value)))
+const paginatedData = computed(() => {
+  if (!chartData.value) return []
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return chartData.value.dates.slice(start, end).map((date, idx) => ({
+    date,
+    weight: chartData.value!.total_by_date[start + idx] || '0'
+  }))
+})
+
+// 图表数据
+const chartDates = computed(() => chartData.value?.dates || [])
+const chartValues = computed(() => chartData.value?.total_by_date.map(v => parseFloat(v)) || [])
+
+// ==================== 验证日期范围 ====================
 function validateDateRange() {
   const start = new Date(filters.value.startDate)
   const end = new Date(filters.value.endDate)
@@ -264,151 +152,83 @@ function validateDateRange() {
   }
 }
 
-// 分页
-const currentPage = ref(1)
-const pageSize = ref(10)
-const totalPages = computed(() => Math.max(1, Math.ceil(rows.value.length / pageSize.value)))
-const paginatedData = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value
-  return rows.value.slice(start, start + pageSize.value)
-})
-
-// 弹窗相关
-const modalVisible = ref(false)
-const modalTitle = ref('')
-const modalDetails = ref<{ variety: string; weight: number }[]>([])
-const modalCurrentPage = ref(1)
-const modalPageSize = ref(5)
-const modalTotalPages = computed(() => Math.max(1, Math.ceil(modalDetails.value.length / modalPageSize.value)))
-const modalPaginatedData = computed(() => {
-  const start = (modalCurrentPage.value - 1) * modalPageSize.value
-  return modalDetails.value.slice(start, start + modalPageSize.value)
-})
-
-// 图表数据
-const chartData = computed(() => {
-  const dateMap = new Map<string, Map<string, number>>()
-  
-  rows.value.forEach(item => {
-    if (!dateMap.has(item.date)) {
-      dateMap.set(item.date, new Map())
-    }
-    item.details.forEach(detail => {
-      const varietyMap = dateMap.get(item.date)!
-      varietyMap.set(detail.variety, (varietyMap.get(detail.variety) || 0) + detail.weight)
-    })
-  })
-  
-  const dates = Array.from(dateMap.keys()).sort()
-  const allVarieties = ['电解铜', '铝锭', '锌锭']
-  
-  allVarieties.forEach(variety => {
-    if (!seriesVisibility.value.has(variety)) {
-      seriesVisibility.value.set(variety, true)
-    }
-  })
-  
-  const series = allVarieties.map(variety => ({
-    name: variety,
-    visible: seriesVisibility.value.get(variety) ?? true,
-    data: dates.map(date => dateMap.get(date)?.get(variety) || 0)
-  }))
-  
-  return { dates, series }
-})
-
-// 汇总数据
-const aggregateData = (data: ForecastRecord[]): SummaryRow[] => {
-  const map = new Map<string, SummaryRow>()
-  
-  data.forEach(item => {
-    const key = `${item.date}|${item.regionalManager}|${item.warehouse}`
-    if (!map.has(key)) {
-      map.set(key, {
-        date: item.date,
-        regionalManager: item.regionalManager,
-        warehouse: item.warehouse,
-        totalWeight: 0,
-        details: []
-      })
-    }
-    const row = map.get(key)!
-    row.totalWeight += item.predictedWeight
-    row.details.push({
-      variety: item.variety,
-      weight: item.predictedWeight
-    })
-  })
-  
-  return Array.from(map.values()).sort((a, b) => {
-    if (a.date !== b.date) return a.date.localeCompare(b.date)
-    if (a.regionalManager !== b.regionalManager) return a.regionalManager.localeCompare(b.regionalManager)
-    return a.warehouse.localeCompare(b.warehouse)
-  })
-}
-
-// 查询预测数据
-async function queryForecastData() {
-  tableLoading.value = true
+// ==================== 获取图表数据 ====================
+async function fetchChartData() {
+  loading.value = true
   try {
-    const { startDate, endDate, regionalManager, warehouse } = filters.value
+    const params: Record<string, any> = {}
     
-    const filtered = ALL_FORECAST_DATA.filter((r) => {
-      if (regionalManager && !r.regionalManager.includes(regionalManager)) return false
-      if (warehouse && !r.warehouse.includes(warehouse)) return false
-      if (startDate && r.date < startDate) return false
-      if (endDate && r.date > endDate) return false
-      return true
-    })
+    if (filters.value.startDate) {
+      params.date_from = filters.value.startDate
+    }
+    if (filters.value.endDate) {
+      params.date_to = filters.value.endDate
+    }
+    if (filters.value.regionalManager) {
+      params.regional_manager = filters.value.regionalManager
+    }
+    if (filters.value.warehouse) {
+      params.warehouse = filters.value.warehouse
+    }
     
-    rows.value = aggregateData(filtered)
-    // 等待 DOM 更新后绘制图表
-    setTimeout(() => drawChart(), 50)
+    const response = await axios.get('/api/v1/forecast/prd/chart', { params })
+    chartData.value = response.data
+    setTimeout(() => drawChart(), 100)
   } catch (error) {
-    console.error('查询失败', error)
-    rows.value = []
+    console.error('获取图表数据失败', error)
+    chartData.value = null
   } finally {
-    tableLoading.value = false
+    loading.value = false
   }
 }
 
-// 图例开关
-function toggleSeries(seriesName: string) {
-  const current = seriesVisibility.value.get(seriesName) ?? true
-  seriesVisibility.value.set(seriesName, !current)
-  drawChart()
+// ==================== 查询 ====================
+async function queryForecastData() {
+  await fetchChartData()
 }
 
-// 绘制图表（动态 X 轴，根据日期数量自动调整）
+function handleQuery() {
+  currentPage.value = 1
+  queryForecastData()
+}
+
+function handleReset() {
+  filters.value = {
+    regionalManager: '',
+    warehouse: '',
+    startDate: todayStr,
+    endDate: getFutureDate(14)
+  }
+  queryForecastData()
+}
+
+// ==================== 分页 ====================
+function prevPage() { if (currentPage.value > 1) currentPage.value-- }
+function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
+
+// ==================== 绘制图表 ====================
 function drawChart() {
-  if (!chartCanvas.value) return
+  if (!chartCanvas.value || chartDates.value.length === 0) return
   
   const ctx = chartCanvas.value.getContext('2d')
   if (!ctx) return
   
-  const { dates, series } = chartData.value
+  const dates = chartDates.value
+  const values = chartValues.value
   if (dates.length === 0) return
   
-  // 获取容器实际宽度
   const container = chartCanvas.value.parentElement
   const containerWidth = container?.clientWidth || 800
-  const width = Math.max(containerWidth, 600)  // 最小600px，根据内容自动扩展
+  const width = Math.max(containerWidth, 600)
   const height = 400
   
   chartCanvas.value.width = width
   chartCanvas.value.height = height
   
-  // 计算可见系列的最大值
-  let maxValue = 0
-  series.forEach(s => {
-    if (s.visible) {
-      const max = Math.max(...s.data)
-      maxValue = Math.max(maxValue, max)
-    }
-  })
-  maxValue = Math.ceil(maxValue * 1.1) || 100
+  let maxValue = Math.max(...values, 100)
+  maxValue = Math.ceil(maxValue * 1.1)
   
-  const margin = { top: 20, right: 80, bottom: 50, left: 60 }
+  const margin = { top: 20, right: 40, bottom: 50, left: 60 }
   const chartWidth = width - margin.left - margin.right
   const chartHeight = height - margin.top - margin.bottom
   
@@ -439,65 +259,54 @@ function drawChart() {
     ctx.fillText(Math.round(value).toString(), -35, y + 3)
   }
   
-  // X轴 - 动态计算步长和标签间距
+  // X轴
   const xStep = dates.length > 1 ? chartWidth / (dates.length - 1) : chartWidth
-  // 根据日期数量动态调整标签显示密度
-  const maxLabels = Math.floor(chartWidth / 70)  // 每70px显示一个标签
+  const maxLabels = Math.floor(chartWidth / 70)
   const labelStep = Math.max(1, Math.ceil(dates.length / maxLabels))
   
   dates.forEach((date, i) => {
     const x = i * xStep
-    // 绘制垂直网格线
     ctx.beginPath()
     ctx.moveTo(x, 0)
     ctx.lineTo(x, chartHeight)
     ctx.strokeStyle = '#f0f0f0'
     ctx.stroke()
     
-    // 只显示部分标签，避免重叠
     if (i % labelStep === 0 || i === dates.length - 1) {
       ctx.fillStyle = '#666'
       ctx.font = '11px Arial'
-      const dateLabel = date.slice(5)  // 只显示 MM-DD
-      ctx.fillText(dateLabel, x - 20, chartHeight + 20)
+      ctx.fillText(date.slice(5), x - 20, chartHeight + 20)
     }
   })
   
   // 绘制折线
-  series.forEach((s, idx) => {
-    if (!s.visible) return
-    
-    const color = colors[idx % colors.length]
+  ctx.beginPath()
+  let first = true
+  values.forEach((value, i) => {
+    const x = i * xStep
+    const y = chartHeight - (value / maxValue) * chartHeight
+    if (first) {
+      ctx.moveTo(x, y)
+      first = false
+    } else {
+      ctx.lineTo(x, y)
+    }
+  })
+  ctx.strokeStyle = '#4A7A9C'
+  ctx.lineWidth = 2
+  ctx.stroke()
+  
+  // 数据点
+  values.forEach((value, i) => {
+    const x = i * xStep
+    const y = chartHeight - (value / maxValue) * chartHeight
     ctx.beginPath()
-    
-    let first = true
-    s.data.forEach((value, i) => {
-      const x = i * xStep
-      const y = chartHeight - (value / maxValue) * chartHeight
-      if (first) {
-        ctx.moveTo(x, y)
-        first = false
-      } else {
-        ctx.lineTo(x, y)
-      }
-    })
-    
-    ctx.strokeStyle = color
-    ctx.lineWidth = 2
-    ctx.stroke()
-    
-    // 数据点
-    s.data.forEach((value, i) => {
-      const x = i * xStep
-      const y = chartHeight - (value / maxValue) * chartHeight
-      ctx.beginPath()
-      ctx.fillStyle = color
-      ctx.arc(x, y, 3, 0, 2 * Math.PI)
-      ctx.fill()
-    })
+    ctx.fillStyle = '#4A7A9C'
+    ctx.arc(x, y, 4, 0, 2 * Math.PI)
+    ctx.fill()
   })
   
-  // Y轴标签
+  // 标签
   ctx.save()
   ctx.translate(-40, chartHeight / 2)
   ctx.rotate(-Math.PI / 2)
@@ -506,7 +315,6 @@ function drawChart() {
   ctx.fillText('重量(吨)', -20, 5)
   ctx.restore()
   
-  // X轴标签
   ctx.fillStyle = '#666'
   ctx.font = '12px Arial'
   ctx.fillText('日期', chartWidth / 2 - 20, chartHeight + 40)
@@ -514,78 +322,43 @@ function drawChart() {
   ctx.restore()
 }
 
-function handleQuery() {
-  currentPage.value = 1
-  queryForecastData()
-}
-
-function handleReset() {
-  filters.value = {
-    regionalManager: '',
-    warehouse: '',
-    startDate: todayStr,
-    endDate: getFutureDate(14)
+// ==================== 导出 ====================
+async function exportExcel() {
+  try {
+    const params: Record<string, any> = {}
+    
+    if (filters.value.startDate) {
+      params.date_from = filters.value.startDate
+    }
+    if (filters.value.endDate) {
+      params.date_to = filters.value.endDate
+    }
+    if (filters.value.regionalManager) {
+      params.regional_manager = filters.value.regionalManager
+    }
+    if (filters.value.warehouse) {
+      params.warehouse = filters.value.warehouse
+    }
+    
+    const response = await axios.get('/api/v1/forecast/prd/export', {
+      params,
+      responseType: 'blob'
+    })
+    
+    const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const link = document.createElement('a')
+    const timestamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)
+    link.href = URL.createObjectURL(blob)
+    link.download = `送货量预测_${timestamp}.xlsx`
+    link.click()
+    URL.revokeObjectURL(link.href)
+  } catch (error) {
+    console.error('导出失败', error)
+    alert('导出失败，请稍后重试')
   }
-  queryForecastData()
 }
 
-function prevPage() { if (currentPage.value > 1) currentPage.value-- }
-function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
-
-function openDetailModal(row: SummaryRow) {
-  modalTitle.value = `${row.date} - ${row.regionalManager} - ${row.warehouse} 品种明细`
-  modalDetails.value = [...row.details]
-  modalCurrentPage.value = 1
-  modalVisible.value = true
-}
-
-function closeModal() {
-  modalVisible.value = false
-  modalDetails.value = []
-}
-
-function exportExcel() {
-  const headers = ['预测日期', '大区经理', '仓库', '预测重量(吨)']
-  const rowsData = rows.value.map(item => [
-    item.date,
-    item.regionalManager,
-    item.warehouse,
-    item.totalWeight
-  ])
-  
-  const csvContent = [headers, ...rowsData].map(row => row.join(',')).join('\n')
-  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
-  const link = document.createElement('a')
-  const timestamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)
-  link.href = URL.createObjectURL(blob)
-  link.download = `送货量预测_${timestamp}.csv`
-  link.click()
-  URL.revokeObjectURL(link.href)
-}
-
-function exportModalExcel() {
-  const headers = ['品种', '预测重量(吨)']
-  const rowsData = modalDetails.value.map(item => [
-    item.variety,
-    item.weight
-  ])
-  
-  const csvContent = [headers, ...rowsData].map(row => row.join(',')).join('\n')
-  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
-  const link = document.createElement('a')
-  const timestamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)
-  link.href = URL.createObjectURL(blob)
-  link.download = `${modalTitle.value}_${timestamp}.csv`
-  link.click()
-  URL.revokeObjectURL(link.href)
-}
-
-// 监听 rows 变化重新绘制图表
-watch(() => rows.value, () => {
-  setTimeout(drawChart, 50)
-}, { deep: true })
-
-// 监听窗口大小变化
+// ==================== 监听窗口大小变化 ====================
 const handleResize = () => {
   setTimeout(drawChart, 100)
 }
@@ -678,54 +451,11 @@ onUnmounted(() => {
 }
 .btn-secondary:hover { background-color: #E5E9F2; }
 
-.btn-sm { padding: 4px 12px; font-size: 12px; }
-.btn-view { background: none; border: 1px solid #4A7A9C; color: #4A7A9C; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-.btn-view:hover { background-color: #4A7A9C; color: white; }
-
 .section-title { font-size: 15px; font-weight: 600; color: #1F2D3D; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #E5E9F2; }
 
-.chart-container { min-height: 450px; }
+.chart-container { min-height: 400px; }
 .chart-wrapper { width: 100%; overflow-x: auto; }
 .chart-wrapper canvas { min-width: 600px; width: 100%; height: auto; }
-
-.chart-legend { 
-  display: flex; 
-  justify-content: space-between; 
-  align-items: center; 
-  flex-wrap: wrap;
-  margin-bottom: 16px; 
-  padding-bottom: 12px; 
-  border-bottom: 1px solid #E5E9F2;
-}
-
-.legend-tip {
-  font-size: 12px;
-  color: #909399;
-  background: #F5F7FA;
-  padding: 4px 12px;
-  border-radius: 16px;
-}
-
-.legend-items {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: background-color 0.2s;
-}
-.legend-item:hover { background-color: #F5F7FA; }
-
-.legend-color { width: 16px; height: 16px; border-radius: 3px; }
-.legend-name { color: #333; }
 
 .loading-placeholder { min-height: 400px; display: flex; align-items: center; justify-content: center; color: #909399; }
 
@@ -741,18 +471,4 @@ onUnmounted(() => {
 .pagination button { padding: 4px 12px; border: 1px solid #E5E9F2; background: white; border-radius: 4px; cursor: pointer; }
 .pagination button:disabled { opacity: 0.5; cursor: not-allowed; }
 .pagination select { padding: 4px 8px; border: 1px solid #E5E9F2; border-radius: 4px; }
-
-/* 弹窗样式 */
-.modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 2000; }
-.modal-content { background: white; border-radius: 8px; width: 600px; max-width: 90%; max-height: 80%; overflow: auto; }
-.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #E5E9F2; }
-.modal-header h3 { font-size: 16px; font-weight: 600; color: #1F2D3D; margin: 0; }
-.close-btn { background: none; border: none; font-size: 24px; cursor: pointer; color: #909399; }
-.close-btn:hover { color: #606266; }
-.modal-body { padding: 20px; }
-.modal-table-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.modal-result-label { font-size: 14px; font-weight: 600; color: #2e7d32; }
-.modal-table { width: 100%; }
-.modal-pagination { margin-top: 16px; }
-.modal-footer { padding: 16px 20px; border-top: 1px solid #E5E9F2; text-align: right; }
 </style>

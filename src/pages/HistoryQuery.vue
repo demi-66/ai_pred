@@ -37,22 +37,80 @@
               <input type="date" v-model="managerFilters.endDate" class="filter-input" />
             </div>
           </div>
-          <div class="filter-item">
+
+          <!-- 大区经理多选 -->
+          <div class="filter-item multi-select-item">
             <label>大区经理</label>
-            <input v-model="managerFilters.regionalManager" class="filter-input" placeholder="输入大区经理" />
+            <div class="multi-select-container">
+              <div class="selected-tags" @click="focusManagerInput">
+                <span v-for="item in managerSelectedManagers" :key="item" class="tag">
+                  {{ item }}
+                  <button type="button" class="tag-remove" @click.stop="removeManager(item)">×</button>
+                </span>
+                <input 
+                  ref="managerInputRef"
+                  v-model="managerSearchText"
+                  type="text"
+                  class="multi-input"
+                  placeholder="搜索并选择"
+                  @input="filterManagerOptions"
+                  @focus="managerDropdownVisible = true"
+                  @blur="closeManagerDropdown"
+                  @keydown.enter="handleManagerKeydown"
+                />
+              </div>
+              <div v-show="managerDropdownVisible && filteredManagerOptions.length > 0" class="dropdown-list">
+                <div 
+                  v-for="item in filteredManagerOptions" 
+                  :key="item"
+                  class="dropdown-item"
+                  @click="addManager(item)"
+                >
+                  {{ item }}
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="filter-item">
+
+          <!-- 冶炼厂多选 -->
+          <div class="filter-item multi-select-item">
             <label>冶炼厂</label>
-            <select v-model="managerFilters.smelter" class="filter-select">
-              <option value="">全部</option>
-              <option v-for="name in smelterOptions" :key="name" :value="name">{{ name }}</option>
-            </select>
+            <div class="multi-select-container">
+              <div class="selected-tags" @click="focusSmelterInput">
+                <span v-for="item in managerSelectedSmelters" :key="item" class="tag">
+                  {{ item }}
+                  <button type="button" class="tag-remove" @click.stop="removeSmelter(item)">×</button>
+                </span>
+                <input 
+                  ref="smelterInputRef"
+                  v-model="smelterSearchText"
+                  type="text"
+                  class="multi-input"
+                  placeholder="搜索并选择"
+                  @input="filterSmelterOptions"
+                  @focus="smelterDropdownVisible = true"
+                  @blur="closeSmelterDropdown"
+                  @keydown.enter="handleSmelterKeydown"
+                />
+              </div>
+              <div v-show="smelterDropdownVisible && filteredSmelterOptions.length > 0" class="dropdown-list">
+                <div 
+                  v-for="item in filteredSmelterOptions" 
+                  :key="item"
+                  class="dropdown-item"
+                  @click="addSmelter(item)"
+                >
+                  {{ item }}
+                </div>
+              </div>
+            </div>
           </div>
+
           <div class="filter-actions">
-            <button class="btn btn-primary" @click="queryManagerData">查询</button>
+            <button class="btn btn-primary" @click="queryManagerData" :disabled="loading">查询</button>
             <button class="btn btn-secondary" @click="resetManagerFilters">重置</button>
-            <button class="btn btn-danger" :disabled="selectedRows.length === 0" @click="handleBatchDelete">
-              批量删除 ({{ selectedRows.length }})
+            <button class="btn btn-danger" :disabled="managerSelectedRows.length === 0" @click="handleManagerBatchDelete">
+              批量删除 ({{ managerSelectedRows.length }})
             </button>
           </div>
         </div>
@@ -60,30 +118,32 @@
 
       <div class="card">
         <div class="result-label">
-          <span>有效合同明细（共 {{ managerFilteredRows.length }} 条）</span>
+          <span>有效合同明细（共 {{ managerTotal }} 条）</span>
           <span class="unit-hint">表中数量为车数</span>
         </div>
         <div class="table-wrapper">
           <table class="data-table">
             <thead>
               <tr>
-                <th width="40"><input type="checkbox" :checked="isAllSelected" @change="toggleSelectAll" /></th>
+                <th width="40"><input type="checkbox" :checked="isManagerAllSelected" @change="toggleManagerSelectAll" /></th>
+                <th>送货日期</th>
                 <th>大区经理</th>
-                <th>冶炼厂</th>
-                <th v-for="date in managerDateColumns" :key="date">{{ date }}</th>
+                <th>仓库</th>
+                <th>品种</th>
+                <th>重量(吨)</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, idx) in managerDisplayRows" :key="`m-${idx}`">
-                <td><input type="checkbox" v-model="selectedRows" :value="row.contract_no" /></td>
-                <td v-if="row.showManager" :rowspan="row.managerRowspan">{{ row.regional_manager }}</td>
-                <td>{{ row.smelter }}</td>
-                <td v-for="(cell, i) in row.cells" :key="`${row.contract_no}-${i}`">
-                  <span :class="{ 'cell-dash': cell.isPlaceholder }">{{ cell.text }}</span>
-                </td>
+              <tr v-for="row in managerPaginatedData" :key="row.id">
+                <td><input type="checkbox" v-model="managerSelectedRows" :value="row.id" /></td>
+                <td>{{ row.delivery_date }}</td>
+                <td>{{ row.regional_manager }}</td>
+                <td>{{ row.warehouse }}</td>
+                <td>{{ row.product_variety }}</td>
+                <td>{{ parseFloat(row.weight).toFixed(2) }}</td>
               </tr>
-              <tr v-if="managerDisplayRows.length === 0">
-                <td :colspan="3 + managerDateColumns.length" class="empty-data">暂无符合筛选条件的数据</td>
+              <tr v-if="managerPaginatedData.length === 0">
+                <td :colspan="6" class="empty-data">暂无数据</td>
               </tr>
             </tbody>
           </table>
@@ -93,7 +153,7 @@
           <button @click="managerCurrentPage--" :disabled="managerCurrentPage === 1">上一页</button>
           <span>第 {{ managerCurrentPage }} / {{ managerTotalPages }} 页</span>
           <button @click="managerCurrentPage++" :disabled="managerCurrentPage === managerTotalPages">下一页</button>
-          <select v-model="pageSize" @change="managerCurrentPage = 1">
+          <select v-model="managerPageSize" @change="managerCurrentPage = 1">
             <option :value="10">10条/页</option>
             <option :value="20">20条/页</option>
             <option :value="50">50条/页</option>
@@ -114,23 +174,111 @@
               <input type="date" v-model="warehouseFilters.endDate" class="filter-input" />
             </div>
           </div>
-          <div class="filter-item">
+
+          <!-- 仓库多选 -->
+          <div class="filter-item multi-select-item">
             <label>仓库</label>
-            <input v-model="warehouseFilters.warehouse" class="filter-input" placeholder="输入仓库" />
+            <div class="multi-select-container">
+              <div class="selected-tags" @click="focusWarehouseInput">
+                <span v-for="item in warehouseSelectedWarehouses" :key="item" class="tag">
+                  {{ item }}
+                  <button type="button" class="tag-remove" @click.stop="removeWarehouse(item)">×</button>
+                </span>
+                <input 
+                  ref="warehouseInputRef"
+                  v-model="warehouseSearchText"
+                  type="text"
+                  class="multi-input"
+                  placeholder="搜索并选择"
+                  @input="filterWarehouseOptions"
+                  @focus="warehouseDropdownVisible = true"
+                  @blur="closeWarehouseDropdown"
+                  @keydown.enter="handleWarehouseKeydown"
+                />
+              </div>
+              <div v-show="warehouseDropdownVisible && filteredWarehouseOptions.length > 0" class="dropdown-list">
+                <div 
+                  v-for="item in filteredWarehouseOptions" 
+                  :key="item"
+                  class="dropdown-item"
+                  @click="addWarehouse(item)"
+                >
+                  {{ item }}
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="filter-item">
+
+          <!-- 大区经理多选 -->
+          <div class="filter-item multi-select-item">
             <label>大区经理</label>
-            <input v-model="warehouseFilters.regionalManager" class="filter-input" placeholder="输入大区经理" />
+            <div class="multi-select-container">
+              <div class="selected-tags" @click="focusWarehouseManagerInput">
+                <span v-for="item in warehouseSelectedManagers" :key="item" class="tag">
+                  {{ item }}
+                  <button type="button" class="tag-remove" @click.stop="removeWarehouseManager(item)">×</button>
+                </span>
+                <input 
+                  ref="warehouseManagerInputRef"
+                  v-model="warehouseManagerSearchText"
+                  type="text"
+                  class="multi-input"
+                  placeholder="搜索并选择"
+                  @input="filterWarehouseManagerOptions"
+                  @focus="warehouseManagerDropdownVisible = true"
+                  @blur="closeWarehouseManagerDropdown"
+                  @keydown.enter="handleWarehouseManagerKeydown"
+                />
+              </div>
+              <div v-show="warehouseManagerDropdownVisible && filteredWarehouseManagerOptions.length > 0" class="dropdown-list">
+                <div 
+                  v-for="item in filteredWarehouseManagerOptions" 
+                  :key="item"
+                  class="dropdown-item"
+                  @click="addWarehouseManager(item)"
+                >
+                  {{ item }}
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="filter-item">
+
+          <!-- 冶炼厂多选 -->
+          <div class="filter-item multi-select-item">
             <label>冶炼厂</label>
-            <select v-model="warehouseFilters.smelter" class="filter-select">
-              <option value="">全部</option>
-              <option v-for="name in smelterOptions" :key="name" :value="name">{{ name }}</option>
-            </select>
+            <div class="multi-select-container">
+              <div class="selected-tags" @click="focusWarehouseSmelterInput">
+                <span v-for="item in warehouseSelectedSmelters" :key="item" class="tag">
+                  {{ item }}
+                  <button type="button" class="tag-remove" @click.stop="removeWarehouseSmelter(item)">×</button>
+                </span>
+                <input 
+                  ref="warehouseSmelterInputRef"
+                  v-model="warehouseSmelterSearchText"
+                  type="text"
+                  class="multi-input"
+                  placeholder="搜索并选择"
+                  @input="filterWarehouseSmelterOptions"
+                  @focus="warehouseSmelterDropdownVisible = true"
+                  @blur="closeWarehouseSmelterDropdown"
+                  @keydown.enter="handleWarehouseSmelterKeydown"
+                />
+              </div>
+              <div v-show="warehouseSmelterDropdownVisible && filteredWarehouseSmelterOptions.length > 0" class="dropdown-list">
+                <div 
+                  v-for="item in filteredWarehouseSmelterOptions" 
+                  :key="item"
+                  class="dropdown-item"
+                  @click="addWarehouseSmelter(item)"
+                >
+                  {{ item }}
+                </div>
+              </div>
+            </div>
           </div>
+
           <div class="filter-actions">
-            <button class="btn btn-primary" @click="queryWarehouseData">查询</button>
+            <button class="btn btn-primary" @click="queryWarehouseData" :disabled="loading">查询</button>
             <button class="btn btn-secondary" @click="resetWarehouseFilters">重置</button>
             <button class="btn btn-danger" :disabled="warehouseSelectedRows.length === 0" @click="handleWarehouseBatchDelete">
               批量删除 ({{ warehouseSelectedRows.length }})
@@ -141,7 +289,7 @@
 
       <div class="card">
         <div class="result-label">
-          <span>有效合同明细（共 {{ warehouseFilteredRows.length }} 条）</span>
+          <span>有效合同明细（共 {{ warehouseTotal }} 条）</span>
           <span class="unit-hint">表中数量为车数</span>
         </div>
         <div class="table-wrapper">
@@ -149,24 +297,24 @@
             <thead>
               <tr>
                 <th width="40"><input type="checkbox" :checked="isWarehouseAllSelected" @change="toggleWarehouseSelectAll" /></th>
-                <th>仓库</th>
+                <th>送货日期</th>
                 <th>大区经理</th>
-                <th>冶炼厂</th>
-                <th v-for="date in warehouseDateColumns" :key="date">{{ date }}</th>
+                <th>仓库</th>
+                <th>品种</th>
+                <th>重量(吨)</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, idx) in warehouseDisplayRows" :key="`w-${idx}`">
-                <td><input type="checkbox" v-model="warehouseSelectedRows" :value="row.contract_no" /></td>
-                <td v-if="row.showWarehouse" :rowspan="row.warehouseRowspan">{{ row.warehouse }}</td>
+              <tr v-for="row in warehousePaginatedData" :key="row.id">
+                <td><input type="checkbox" v-model="warehouseSelectedRows" :value="row.id" /></td>
+                <td>{{ row.delivery_date }}</td>
                 <td>{{ row.regional_manager }}</td>
-                <td>{{ row.smelter }}</td>
-                <td v-for="(cell, i) in row.cells" :key="`${row.contract_no}-${i}`">
-                  <span :class="{ 'cell-dash': cell.isPlaceholder }">{{ cell.text }}</span>
-                </td>
+                <td>{{ row.warehouse }}</td>
+                <td>{{ row.product_variety }}</td>
+                <td>{{ parseFloat(row.weight).toFixed(2) }}</td>
               </tr>
-              <tr v-if="warehouseDisplayRows.length === 0">
-                <td :colspan="4 + warehouseDateColumns.length" class="empty-data">暂无符合筛选条件的数据</td>
+              <tr v-if="warehousePaginatedData.length === 0">
+                <td :colspan="6" class="empty-data">暂无数据</td>
               </tr>
             </tbody>
           </table>
@@ -184,332 +332,555 @@
         </div>
       </div>
     </div>
+
+    <!-- 错误提示弹窗 -->
+    <div v-if="errorModalVisible" class="modal" @click.self="closeErrorModal">
+      <div class="modal-content modal-small">
+        <div class="modal-header error-header">
+          <h3>提示</h3>
+          <button class="close-btn" @click="closeErrorModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-message">{{ errorModalMessage }}</p>
+          <div v-if="errorModalDetails.length > 0" class="modal-details">
+            <ul>
+              <li v-for="detail in errorModalDetails" :key="detail">{{ detail }}</li>
+            </ul>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" @click="closeErrorModal">确定</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import {
-  dateColumnsForMockQuery,
-  generatePurchaseMockRecords,
-  mockRecordsToTableRows,
-  rowHasTruckInColumns,
-  type PurchaseMockRecord,
-} from '@/data/purchaseMockData'
+import { ref, computed, onMounted, watch } from 'vue'
+import axios from 'axios'
 
-// ==================== 模拟数据 ====================
-interface ExtendedMockRecord extends PurchaseMockRecord {
-  warehouse: string
-}
-
-const ALL_MOCK_RECORDS: ExtendedMockRecord[] = (() => {
-  const raw = generatePurchaseMockRecords(100) as ExtendedMockRecord[]
-  const warehouses = ['北京仓库', '上海仓库', '广州仓库', '深圳仓库', '成都仓库']
-  
-  const recordsWithWarehouse = raw.map((record, index) => ({
-    ...record,
-    warehouse: warehouses[index % warehouses.length]
-  }))
-  
-  if (recordsWithWarehouse.length <= 2) return recordsWithWarehouse
-  const a = Math.floor(Math.random() * recordsWithWarehouse.length)
-  let b = Math.floor(Math.random() * recordsWithWarehouse.length)
-  while (b === a) b = Math.floor(Math.random() * recordsWithWarehouse.length)
-  return recordsWithWarehouse.filter((_, idx) => idx !== a && idx !== b)
-})()
-
-const FIXED_SMELTER_OPTIONS = ['金利', '豫光']
+// ==================== 配置 ====================
+const API_BASE_URL = 'http://111.229.25.160:8001'
 
 // ==================== 类型定义 ====================
-type CellDisplay = { text: string; isPlaceholder?: boolean }
-
-interface MockTableRow {
-  regional_manager: string
-  smelter: string
-  contract_no: string
-  cells: CellDisplay[]
-  [key: string]: any
-}
-
-interface ExtendedTableRow {
+interface HistoryRecord {
+  id: number
+  delivery_date: string
   regional_manager: string
   warehouse: string
-  smelter: string
-  contract_no: string
-  cells: CellDisplay[]
+  product_variety: string
+  weight: string
+  created_at: string
 }
 
-// ==================== 状态 ====================
+interface ApiResponse {
+  items: HistoryRecord[]
+  total: number
+  page: number
+  page_size: number
+}
+
+// ==================== 通用状态 ====================
 const activeTab = ref('manager')
 const globalSearch = ref('')
+const loading = ref(false)
 
-const todayStr = new Date().toISOString().slice(0, 10)
-function plusDays(dateText: string, days: number) {
-  const d = new Date(`${dateText}T00:00:00`)
-  d.setDate(d.getDate() + days)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+// 错误弹窗
+const errorModalVisible = ref(false)
+const errorModalMessage = ref('')
+const errorModalDetails = ref<string[]>([])
+
+const showError = (message: string, details?: string[]) => {
+  errorModalMessage.value = message
+  errorModalDetails.value = details || []
+  errorModalVisible.value = true
 }
 
+const closeErrorModal = () => {
+  errorModalVisible.value = false
+  errorModalMessage.value = ''
+  errorModalDetails.value = []
+}
+
+// 冶炼厂选项
+const allSmelterOptions = ['金利', '豫光']
+
 // ==================== 按大区经理查询 ====================
-const managerRows = ref<ExtendedTableRow[]>([])
-const managerDateColumns = ref<string[]>([])
+const managerData = ref<HistoryRecord[]>([])
+const managerTotal = ref(0)
 const managerCurrentPage = ref(1)
-const pageSize = ref(10)
-const selectedRows = ref<string[]>([])
+const managerPageSize = ref(10)
+const managerSelectedRows = ref<number[]>([])
+
+// 大区经理多选
+const managerSelectedManagers = ref<string[]>([])
+const managerSearchText = ref('')
+const managerDropdownVisible = ref(false)
+const managerInputRef = ref<HTMLInputElement>()
+const allManagerOptions = ref<string[]>([])
+const filteredManagerOptions = ref<string[]>([])
+
+// 冶炼厂多选
+const managerSelectedSmelters = ref<string[]>([])
+const smelterSearchText = ref('')
+const smelterDropdownVisible = ref(false)
+const smelterInputRef = ref<HTMLInputElement>()
+const filteredSmelterOptions = ref<string[]>([])
 
 const managerFilters = ref({
   startDate: '',
-  endDate: '',
-  regionalManager: '',
-  smelter: '',
+  endDate: ''
 })
 
-const smelterOptions = computed(() => {
-  return FIXED_SMELTER_OPTIONS
+const managerTotalPages = computed(() => Math.max(1, Math.ceil(managerTotal.value / managerPageSize.value)))
+const managerPaginatedData = computed(() => managerData.value)
+
+const isManagerAllSelected = computed(() => {
+  return managerPaginatedData.value.length > 0 && managerSelectedRows.value.length === managerPaginatedData.value.length
 })
 
-const managerFilteredRows = computed(() => {
-  let list = managerRows.value
-
-  if (globalSearch.value) {
-    const search = globalSearch.value.toLowerCase()
-    list = list.filter(row =>
-      row.regional_manager.toLowerCase().includes(search) ||
-      row.smelter.toLowerCase().includes(search)
-    )
-  }
-
-  list = list.filter(row => {
-    if (managerFilters.value.regionalManager && !row.regional_manager.toLowerCase().includes(managerFilters.value.regionalManager.toLowerCase())) return false
-    if (managerFilters.value.smelter && row.smelter !== managerFilters.value.smelter) return false
-    return true
-  })
-
-  return list
-})
-
-const managerTotalPages = computed(() => Math.max(1, Math.ceil(managerFilteredRows.value.length / pageSize.value)))
-const managerPagedRows = computed(() => {
-  const start = (managerCurrentPage.value - 1) * pageSize.value
-  return managerFilteredRows.value.slice(start, start + pageSize.value)
-})
-
-const managerDisplayRows = computed(() => {
-  const list = managerPagedRows.value
-  return list.map((row, idx) => {
-    const prev = idx > 0 ? list[idx - 1] : null
-    const isFirstInGroup = !prev || prev.regional_manager !== row.regional_manager
-    let rowspan = 1
-    if (isFirstInGroup) {
-      for (let j = idx + 1; j < list.length; j++) {
-        if (list[j].regional_manager === row.regional_manager) rowspan++
-        else break
-      }
-    }
-    return {
-      ...row,
-      showManager: isFirstInGroup,
-      managerRowspan: isFirstInGroup ? rowspan : 0,
-    }
-  })
-})
-
-const isAllSelected = computed(() => {
-  return managerPagedRows.value.length > 0 && selectedRows.value.length === managerPagedRows.value.length
-})
-
-function toggleSelectAll() {
-  if (isAllSelected.value) {
-    selectedRows.value = []
+// 大区经理多选逻辑
+const filterManagerOptions = () => {
+  const search = managerSearchText.value.toLowerCase()
+  if (search) {
+    filteredManagerOptions.value = allManagerOptions.value.filter(opt => opt.toLowerCase().includes(search))
   } else {
-    selectedRows.value = managerPagedRows.value.map(row => row.contract_no)
+    filteredManagerOptions.value = [...allManagerOptions.value]
+  }
+  managerDropdownVisible.value = filteredManagerOptions.value.length > 0
+}
+
+const addManager = (item: string) => {
+  if (!managerSelectedManagers.value.includes(item)) {
+    managerSelectedManagers.value.push(item)
+  }
+  managerSearchText.value = ''
+  filterManagerOptions()
+}
+
+const removeManager = (item: string) => {
+  managerSelectedManagers.value = managerSelectedManagers.value.filter(i => i !== item)
+}
+
+const handleManagerKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter' && managerSearchText.value.trim()) {
+    addManager(managerSearchText.value.trim())
+    e.preventDefault()
   }
 }
 
+const closeManagerDropdown = () => {
+  setTimeout(() => {
+    managerDropdownVisible.value = false
+  }, 200)
+}
+
+const focusManagerInput = () => {
+  managerInputRef.value?.focus()
+}
+
+// 冶炼厂多选逻辑
+const filterSmelterOptions = () => {
+  const search = smelterSearchText.value.toLowerCase()
+  if (search) {
+    filteredSmelterOptions.value = allSmelterOptions.filter(opt => opt.toLowerCase().includes(search))
+  } else {
+    filteredSmelterOptions.value = [...allSmelterOptions]
+  }
+  smelterDropdownVisible.value = filteredSmelterOptions.value.length > 0
+}
+
+const addSmelter = (item: string) => {
+  if (!managerSelectedSmelters.value.includes(item)) {
+    managerSelectedSmelters.value.push(item)
+  }
+  smelterSearchText.value = ''
+  filterSmelterOptions()
+}
+
+const removeSmelter = (item: string) => {
+  managerSelectedSmelters.value = managerSelectedSmelters.value.filter(i => i !== item)
+}
+
+const handleSmelterKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter' && smelterSearchText.value.trim()) {
+    addSmelter(smelterSearchText.value.trim())
+    e.preventDefault()
+  }
+}
+
+const closeSmelterDropdown = () => {
+  setTimeout(() => {
+    smelterDropdownVisible.value = false
+  }, 200)
+}
+
+const focusSmelterInput = () => {
+  smelterInputRef.value?.focus()
+}
+
+// 查询按大区经理数据
 async function queryManagerData() {
-  const { startDate, endDate, regionalManager, smelter } = managerFilters.value
-
-  const filtered = ALL_MOCK_RECORDS.filter(r => {
-    if (regionalManager && !r.regional_manager.toLowerCase().includes(regionalManager.toLowerCase())) return false
-    if (smelter && r.smelter_company !== smelter) return false
-    if (startDate && r.delivery_date < startDate) return false
-    if (endDate && r.delivery_date > endDate) return false
-    return true
-  })
-
-  const cols = dateColumnsForMockQuery(startDate || todayStr, endDate || plusDays(todayStr, 5))
-  managerDateColumns.value = cols
-  const built = mockRecordsToTableRows(filtered, cols) as MockTableRow[]
-  
-  const extendedRows: ExtendedTableRow[] = built.filter(r => rowHasTruckInColumns(r)).map(row => {
-    const originalRecord = filtered.find(r => r.contract_no === row.contract_no)
-    return {
-      regional_manager: row.regional_manager,
-      warehouse: originalRecord?.warehouse || '',
-      smelter: row.smelter,
-      contract_no: row.contract_no,
-      cells: row.cells,
+  loading.value = true
+  try {
+    const params: Record<string, any> = {
+      page: managerCurrentPage.value,
+      page_size: managerPageSize.value
     }
-  })
-  
-  managerRows.value = extendedRows
-  managerCurrentPage.value = 1
-  selectedRows.value = []
+    
+    if (managerFilters.value.startDate) {
+      params.date_from = managerFilters.value.startDate
+    }
+    if (managerFilters.value.endDate) {
+      params.date_to = managerFilters.value.endDate
+    }
+    if (managerSelectedManagers.value.length > 0) {
+      params.regional_managers = managerSelectedManagers.value
+    }
+    if (managerSelectedSmelters.value.length > 0) {
+      params.product_varieties = managerSelectedSmelters.value
+    }
+    if (globalSearch.value) {
+      params.global_search = globalSearch.value
+    }
+    
+    console.log('请求参数:', params)
+    
+    const response = await axios.get(`${API_BASE_URL}/api/v1/history`, { params })
+    const data = response.data as ApiResponse
+    
+    if (data && data.items) {
+      managerData.value = data.items
+      managerTotal.value = data.total
+      // 更新下拉选项
+      allManagerOptions.value = [...new Set(data.items.map(item => item.regional_manager))].filter(Boolean)
+      filteredManagerOptions.value = [...allManagerOptions.value]
+    } else {
+      managerData.value = []
+      managerTotal.value = 0
+    }
+  } catch (error) {
+    console.error('查询失败', error)
+    showError('查询失败', ['请检查网络连接或稍后重试'])
+  } finally {
+    loading.value = false
+  }
 }
 
 function resetManagerFilters() {
   managerFilters.value = {
     startDate: '',
-    endDate: '',
-    regionalManager: '',
-    smelter: '',
+    endDate: ''
   }
+  managerSelectedManagers.value = []
+  managerSelectedSmelters.value = []
+  managerSearchText.value = ''
+  smelterSearchText.value = ''
+  managerCurrentPage.value = 1
   queryManagerData()
 }
 
-function handleBatchDelete() {
-  if (selectedRows.value.length === 0) return
-  if (confirm(`确认删除选中的${selectedRows.value.length}条记录？此操作不可恢复。`)) {
-    alert(`成功删除${selectedRows.value.length}条数据`)
-    selectedRows.value = []
+function toggleManagerSelectAll() {
+  if (isManagerAllSelected.value) {
+    managerSelectedRows.value = []
+  } else {
+    managerSelectedRows.value = managerPaginatedData.value.map(row => row.id)
+  }
+}
+
+async function handleManagerBatchDelete() {
+  if (managerSelectedRows.value.length === 0) return
+  if (!confirm(`确认删除选中的${managerSelectedRows.value.length}条记录？此操作不可恢复。`)) return
+  
+  try {
+    await axios.delete(`${API_BASE_URL}/api/v1/history/batch`, {
+      data: { ids: managerSelectedRows.value }
+    })
+    showError(`成功删除${managerSelectedRows.value.length}条数据`, [])
+    managerSelectedRows.value = []
     queryManagerData()
+  } catch (error: any) {
+    console.error('删除失败', error)
+    showError('删除失败', [error.response?.data?.message || '请稍后重试'])
   }
 }
 
 // ==================== 按仓库查询 ====================
-const warehouseRows = ref<ExtendedTableRow[]>([])
-const warehouseDateColumns = ref<string[]>([])
+const warehouseData = ref<HistoryRecord[]>([])
+const warehouseTotal = ref(0)
 const warehouseCurrentPage = ref(1)
 const warehousePageSize = ref(10)
-const warehouseSelectedRows = ref<string[]>([])
+const warehouseSelectedRows = ref<number[]>([])
+
+// 仓库多选
+const warehouseSelectedWarehouses = ref<string[]>([])
+const warehouseSearchText = ref('')
+const warehouseDropdownVisible = ref(false)
+const warehouseInputRef = ref<HTMLInputElement>()
+const allWarehouseOptions = ref<string[]>([])
+const filteredWarehouseOptions = ref<string[]>([])
+
+// 大区经理多选
+const warehouseSelectedManagers = ref<string[]>([])
+const warehouseManagerSearchText = ref('')
+const warehouseManagerDropdownVisible = ref(false)
+const warehouseManagerInputRef = ref<HTMLInputElement>()
+const filteredWarehouseManagerOptions = ref<string[]>([])
+
+// 冶炼厂多选
+const warehouseSelectedSmelters = ref<string[]>([])
+const warehouseSmelterSearchText = ref('')
+const warehouseSmelterDropdownVisible = ref(false)
+const warehouseSmelterInputRef = ref<HTMLInputElement>()
+const filteredWarehouseSmelterOptions = ref<string[]>([])
 
 const warehouseFilters = ref({
   startDate: '',
-  endDate: '',
-  warehouse: '',
-  regionalManager: '',
-  smelter: '',
+  endDate: ''
 })
 
-const warehouseFilteredRows = computed(() => {
-  let list = warehouseRows.value
-
-  if (globalSearch.value) {
-    const search = globalSearch.value.toLowerCase()
-    list = list.filter(row =>
-      row.warehouse.toLowerCase().includes(search) ||
-      row.regional_manager.toLowerCase().includes(search) ||
-      row.smelter.toLowerCase().includes(search)
-    )
-  }
-
-  list = list.filter(row => {
-    if (warehouseFilters.value.warehouse && !row.warehouse.toLowerCase().includes(warehouseFilters.value.warehouse.toLowerCase())) return false
-    if (warehouseFilters.value.regionalManager && !row.regional_manager.toLowerCase().includes(warehouseFilters.value.regionalManager.toLowerCase())) return false
-    if (warehouseFilters.value.smelter && row.smelter !== warehouseFilters.value.smelter) return false
-    return true
-  })
-
-  return list
-})
-
-const warehouseTotalPages = computed(() => Math.max(1, Math.ceil(warehouseFilteredRows.value.length / warehousePageSize.value)))
-const warehousePagedRows = computed(() => {
-  const start = (warehouseCurrentPage.value - 1) * warehousePageSize.value
-  return warehouseFilteredRows.value.slice(start, start + warehousePageSize.value)
-})
-
-const warehouseDisplayRows = computed(() => {
-  const list = warehousePagedRows.value
-  return list.map((row, idx) => {
-    const prev = idx > 0 ? list[idx - 1] : null
-    const isFirstInGroup = !prev || prev.warehouse !== row.warehouse
-    let rowspan = 1
-    if (isFirstInGroup) {
-      for (let j = idx + 1; j < list.length; j++) {
-        if (list[j].warehouse === row.warehouse) rowspan++
-        else break
-      }
-    }
-    return {
-      ...row,
-      showWarehouse: isFirstInGroup,
-      warehouseRowspan: isFirstInGroup ? rowspan : 0,
-    }
-  })
-})
+const warehouseTotalPages = computed(() => Math.max(1, Math.ceil(warehouseTotal.value / warehousePageSize.value)))
+const warehousePaginatedData = computed(() => warehouseData.value)
 
 const isWarehouseAllSelected = computed(() => {
-  return warehousePagedRows.value.length > 0 && warehouseSelectedRows.value.length === warehousePagedRows.value.length
+  return warehousePaginatedData.value.length > 0 && warehouseSelectedRows.value.length === warehousePaginatedData.value.length
 })
 
-function toggleWarehouseSelectAll() {
-  if (isWarehouseAllSelected.value) {
-    warehouseSelectedRows.value = []
+// 仓库多选逻辑
+const filterWarehouseOptions = () => {
+  const search = warehouseSearchText.value.toLowerCase()
+  if (search) {
+    filteredWarehouseOptions.value = allWarehouseOptions.value.filter(opt => opt.toLowerCase().includes(search))
   } else {
-    warehouseSelectedRows.value = warehousePagedRows.value.map(row => row.contract_no)
+    filteredWarehouseOptions.value = [...allWarehouseOptions.value]
+  }
+  warehouseDropdownVisible.value = filteredWarehouseOptions.value.length > 0
+}
+
+const addWarehouse = (item: string) => {
+  if (!warehouseSelectedWarehouses.value.includes(item)) {
+    warehouseSelectedWarehouses.value.push(item)
+  }
+  warehouseSearchText.value = ''
+  filterWarehouseOptions()
+}
+
+const removeWarehouse = (item: string) => {
+  warehouseSelectedWarehouses.value = warehouseSelectedWarehouses.value.filter(i => i !== item)
+}
+
+const handleWarehouseKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter' && warehouseSearchText.value.trim()) {
+    addWarehouse(warehouseSearchText.value.trim())
+    e.preventDefault()
   }
 }
 
+const closeWarehouseDropdown = () => {
+  setTimeout(() => {
+    warehouseDropdownVisible.value = false
+  }, 200)
+}
+
+const focusWarehouseInput = () => {
+  warehouseInputRef.value?.focus()
+}
+
+// 大区经理多选逻辑
+const filterWarehouseManagerOptions = () => {
+  const search = warehouseManagerSearchText.value.toLowerCase()
+  if (search) {
+    filteredWarehouseManagerOptions.value = allManagerOptions.value.filter(opt => opt.toLowerCase().includes(search))
+  } else {
+    filteredWarehouseManagerOptions.value = [...allManagerOptions.value]
+  }
+  warehouseManagerDropdownVisible.value = filteredWarehouseManagerOptions.value.length > 0
+}
+
+const addWarehouseManager = (item: string) => {
+  if (!warehouseSelectedManagers.value.includes(item)) {
+    warehouseSelectedManagers.value.push(item)
+  }
+  warehouseManagerSearchText.value = ''
+  filterWarehouseManagerOptions()
+}
+
+const removeWarehouseManager = (item: string) => {
+  warehouseSelectedManagers.value = warehouseSelectedManagers.value.filter(i => i !== item)
+}
+
+const handleWarehouseManagerKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter' && warehouseManagerSearchText.value.trim()) {
+    addWarehouseManager(warehouseManagerSearchText.value.trim())
+    e.preventDefault()
+  }
+}
+
+const closeWarehouseManagerDropdown = () => {
+  setTimeout(() => {
+    warehouseManagerDropdownVisible.value = false
+  }, 200)
+}
+
+const focusWarehouseManagerInput = () => {
+  warehouseManagerInputRef.value?.focus()
+}
+
+// 冶炼厂多选逻辑
+const filterWarehouseSmelterOptions = () => {
+  const search = warehouseSmelterSearchText.value.toLowerCase()
+  if (search) {
+    filteredWarehouseSmelterOptions.value = allSmelterOptions.filter(opt => opt.toLowerCase().includes(search))
+  } else {
+    filteredWarehouseSmelterOptions.value = [...allSmelterOptions]
+  }
+  warehouseSmelterDropdownVisible.value = filteredWarehouseSmelterOptions.value.length > 0
+}
+
+const addWarehouseSmelter = (item: string) => {
+  if (!warehouseSelectedSmelters.value.includes(item)) {
+    warehouseSelectedSmelters.value.push(item)
+  }
+  warehouseSmelterSearchText.value = ''
+  filterWarehouseSmelterOptions()
+}
+
+const removeWarehouseSmelter = (item: string) => {
+  warehouseSelectedSmelters.value = warehouseSelectedSmelters.value.filter(i => i !== item)
+}
+
+const handleWarehouseSmelterKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter' && warehouseSmelterSearchText.value.trim()) {
+    addWarehouseSmelter(warehouseSmelterSearchText.value.trim())
+    e.preventDefault()
+  }
+}
+
+const closeWarehouseSmelterDropdown = () => {
+  setTimeout(() => {
+    warehouseSmelterDropdownVisible.value = false
+  }, 200)
+}
+
+const focusWarehouseSmelterInput = () => {
+  warehouseSmelterInputRef.value?.focus()
+}
+
+// 查询按仓库数据
 async function queryWarehouseData() {
-  const { startDate, endDate, warehouse, regionalManager, smelter } = warehouseFilters.value
-
-  const filtered = ALL_MOCK_RECORDS.filter(r => {
-    if (warehouse && !r.warehouse.toLowerCase().includes(warehouse.toLowerCase())) return false
-    if (regionalManager && !r.regional_manager.toLowerCase().includes(regionalManager.toLowerCase())) return false
-    if (smelter && r.smelter_company !== smelter) return false
-    if (startDate && r.delivery_date < startDate) return false
-    if (endDate && r.delivery_date > endDate) return false
-    return true
-  })
-
-  const cols = dateColumnsForMockQuery(startDate || todayStr, endDate || plusDays(todayStr, 5))
-  warehouseDateColumns.value = cols
-  const built = mockRecordsToTableRows(filtered, cols) as MockTableRow[]
-  
-  const extendedRows: ExtendedTableRow[] = built.filter(r => rowHasTruckInColumns(r)).map(row => {
-    const originalRecord = filtered.find(r => r.contract_no === row.contract_no)
-    return {
-      regional_manager: row.regional_manager,
-      warehouse: originalRecord?.warehouse || '',
-      smelter: row.smelter,
-      contract_no: row.contract_no,
-      cells: row.cells,
+  loading.value = true
+  try {
+    const params: Record<string, any> = {
+      page: warehouseCurrentPage.value,
+      page_size: warehousePageSize.value
     }
-  })
-  
-  warehouseRows.value = extendedRows
-  warehouseCurrentPage.value = 1
-  warehouseSelectedRows.value = []
+    
+    if (warehouseFilters.value.startDate) {
+      params.date_from = warehouseFilters.value.startDate
+    }
+    if (warehouseFilters.value.endDate) {
+      params.date_to = warehouseFilters.value.endDate
+    }
+    if (warehouseSelectedWarehouses.value.length > 0) {
+      params.warehouses = warehouseSelectedWarehouses.value
+    }
+    if (warehouseSelectedManagers.value.length > 0) {
+      params.regional_managers = warehouseSelectedManagers.value
+    }
+    if (warehouseSelectedSmelters.value.length > 0) {
+      params.product_varieties = warehouseSelectedSmelters.value
+    }
+    if (globalSearch.value) {
+      params.global_search = globalSearch.value
+    }
+    
+    console.log('请求参数:', params)
+    
+    const response = await axios.get(`${API_BASE_URL}/api/v1/history`, { params })
+    const data = response.data as ApiResponse
+    
+    if (data && data.items) {
+      warehouseData.value = data.items
+      warehouseTotal.value = data.total
+      // 更新下拉选项
+      allWarehouseOptions.value = [...new Set(data.items.map(item => item.warehouse))].filter(Boolean)
+      filteredWarehouseOptions.value = [...allWarehouseOptions.value]
+      allManagerOptions.value = [...new Set(data.items.map(item => item.regional_manager))].filter(Boolean)
+      filteredWarehouseManagerOptions.value = [...allManagerOptions.value]
+    } else {
+      warehouseData.value = []
+      warehouseTotal.value = 0
+    }
+  } catch (error) {
+    console.error('查询失败', error)
+    showError('查询失败', ['请检查网络连接或稍后重试'])
+  } finally {
+    loading.value = false
+  }
 }
 
 function resetWarehouseFilters() {
   warehouseFilters.value = {
     startDate: '',
-    endDate: '',
-    warehouse: '',
-    regionalManager: '',
-    smelter: '',
+    endDate: ''
   }
+  warehouseSelectedWarehouses.value = []
+  warehouseSelectedManagers.value = []
+  warehouseSelectedSmelters.value = []
+  warehouseSearchText.value = ''
+  warehouseManagerSearchText.value = ''
+  warehouseSmelterSearchText.value = ''
+  warehouseCurrentPage.value = 1
   queryWarehouseData()
 }
 
-function handleWarehouseBatchDelete() {
+function toggleWarehouseSelectAll() {
+  if (isWarehouseAllSelected.value) {
+    warehouseSelectedRows.value = []
+  } else {
+    warehouseSelectedRows.value = warehousePaginatedData.value.map(row => row.id)
+  }
+}
+
+async function handleWarehouseBatchDelete() {
   if (warehouseSelectedRows.value.length === 0) return
-  if (confirm(`确认删除选中的${warehouseSelectedRows.value.length}条记录？此操作不可恢复。`)) {
-    alert(`成功删除${warehouseSelectedRows.value.length}条数据`)
+  if (!confirm(`确认删除选中的${warehouseSelectedRows.value.length}条记录？此操作不可恢复。`)) return
+  
+  try {
+    await axios.delete(`${API_BASE_URL}/api/v1/history/batch`, {
+      data: { ids: warehouseSelectedRows.value }
+    })
+    showError(`成功删除${warehouseSelectedRows.value.length}条数据`, [])
     warehouseSelectedRows.value = []
     queryWarehouseData()
+  } catch (error: any) {
+    console.error('删除失败', error)
+    showError('删除失败', [error.response?.data?.message || '请稍后重试'])
   }
 }
 
 function handleGlobalSearch() {
   if (activeTab.value === 'manager') {
     managerCurrentPage.value = 1
+    queryManagerData()
   } else {
     warehouseCurrentPage.value = 1
+    queryWarehouseData()
   }
 }
+
+// 监听分页变化
+watch([managerCurrentPage, managerPageSize], () => {
+  if (activeTab.value === 'manager') {
+    queryManagerData()
+  }
+})
+watch([warehouseCurrentPage, warehousePageSize], () => {
+  if (activeTab.value === 'warehouse') {
+    queryWarehouseData()
+  }
+})
 
 onMounted(() => {
   queryManagerData()
@@ -602,17 +973,99 @@ onMounted(() => {
   width: 130px;
 }
 
-.filter-select {
-  padding: 6px 10px;
-  border: 1px solid #E5E9F2;
-  border-radius: 4px;
-  font-size: 13px;
-  min-width: 120px;
-}
-
 .filter-actions {
   display: flex;
   gap: 10px;
+  margin-left: auto;
+}
+
+/* 多选组件样式 */
+.multi-select-item {
+  min-width: 180px;
+}
+
+.multi-select-container {
+  position: relative;
+  width: 200px;
+}
+
+.selected-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid #E5E9F2;
+  border-radius: 4px;
+  background: white;
+  min-height: 32px;
+  cursor: text;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background-color: #E8F0F8;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #2c3e50;
+}
+
+.tag-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #909399;
+  padding: 0 2px;
+}
+
+.tag-remove:hover {
+  color: #f56c6c;
+}
+
+.multi-input {
+  flex: 1;
+  min-width: 60px;
+  border: none;
+  outline: none;
+  padding: 4px 6px;
+  font-size: 13px;
+  background: transparent;
+}
+
+.multi-input::placeholder {
+  color: #c0c4cc;
+}
+
+.dropdown-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid #E5E9F2;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  margin-top: 2px;
+}
+
+.dropdown-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #606266;
+  text-align: left;
+}
+
+.dropdown-item:hover {
+  background-color: #F5F7FA;
+  color: #4A7A9C;
 }
 
 .btn {
@@ -699,10 +1152,6 @@ onMounted(() => {
   color: #909399;
 }
 
-.cell-dash {
-  color: #94a3b8;
-}
-
 .pagination {
   display: flex;
   justify-content: flex-end;
@@ -728,5 +1177,98 @@ onMounted(() => {
   padding: 4px 8px;
   border: 1px solid #E5E9F2;
   border-radius: 4px;
+}
+
+/* 弹窗样式 */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 8px;
+  width: 500px;
+  max-width: 90%;
+  max-height: 80%;
+  overflow: auto;
+}
+
+.modal-small {
+  width: 450px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #E5E9F2;
+}
+
+.modal-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1F2D3D;
+  margin: 0;
+}
+
+.error-header {
+  background-color: #ffebee;
+  border-bottom-color: #ef9a9a;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #909399;
+}
+
+.close-btn:hover {
+  color: #606266;
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+.modal-message {
+  font-size: 14px;
+  color: #606266;
+  margin-bottom: 12px;
+}
+
+.modal-details {
+  background-color: #f5f7fa;
+  padding: 12px;
+  border-radius: 4px;
+  margin-top: 12px;
+}
+
+.modal-details ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: #909399;
+}
+
+.modal-details li {
+  margin: 4px 0;
+}
+
+.modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid #E5E9F2;
+  text-align: right;
 }
 </style>
